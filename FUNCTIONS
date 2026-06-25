@@ -1,0 +1,97 @@
+import os
+from psychopy import visual, gui, core
+import random
+import config
+
+#okno poczatkowe zbierajace dane badanego
+def get_subject_info():
+    info = {"ID": "001", "Wiek": "", "Plec": ["M", "K", "Inna"]}
+    dlg = gui.DlgFromDict(dictionary=info, title="Badanie Stroopa")
+    if not dlg.OK:
+        core.quit()
+    return info
+
+#tworzenie folderu na wyniki, jesli nie istnieje
+def create_results_dir():
+    if not os.path.exists("results"):
+        os.makedirs("results")
+
+#wyswietlanie tekstu i oczekiwanie na spacje
+def show_text(win, text, kb, height=24, color="black"):
+    msg = visual.TextStim(
+        win, text=text, color=color, height=height, wrapWidth=900, units="pix"
+    )
+    msg.draw()
+    win.flip()
+    kb.clearEvents()
+    kb.waitKeys(keyList=["space"])
+
+#generowanie pelnej puli prob eksperymentalnych z restrykcjami
+def generate_experiment_pool():
+    pool = []
+    for color in config.colors:
+        correct_key = config.key_mapping[color]
+        idx = config.colors.index(color)
+
+        # 20 prob kongruentnych
+        for _ in range(20):
+            pool.append({
+                "word": config.color_words[idx],
+                "color": color,
+                "type": "kongruentna",
+                "key": correct_key,
+            })
+        # 20 prob niekongruentnych
+        for _ in range(20):
+            pool.append({
+                "word": config.color_words[1 - idx],
+                "color": color,
+                "type": "niekongruentna",
+                "key": correct_key,
+            })
+        # 20 prob neutralnych
+        for _ in range(20):
+            pool.append({
+                "word": config.neutral_stim,
+                "color": color,
+                "type": "neutralna",
+                "key": correct_key,
+            })
+
+    #losowanie z ograniczeniami (max 3 te same typy, brak identycznych obok siebie)
+    for _ in range(500):
+        random.shuffle(pool)
+        valid = True
+        for i in range(len(pool)):
+            if i >= 3 and pool[i]["type"] == pool[i-1]["type"] == pool[i-2]["type"] == pool[i-3]["type"]:
+                valid = False
+                break
+            if i >= 1 and pool[i]["word"] == pool[i-1]["word"] and pool[i]["color"] == pool[i-1]["color"]:
+                valid = False
+                break
+        if valid:
+            return pool
+    return pool
+
+#generowanie losowej puli prob dla treningu
+def generate_training_pool(part, n_trials):
+    trials = []
+    for _ in range(n_trials):
+        color = random.choice(config.colors)
+        key = config.key_mapping[color]
+        idx = config.colors.index(color)
+
+        if part == 1:
+            trials.append({
+                "word": config.neutral_stim,
+                "color": color,
+                "type": "trening_kolor",
+                "key": key,
+            })
+        else:
+            ttype = random.choice(["kongruentna", "niekongruentna", "neutralna"])
+            word = config.color_words[idx] if ttype == "kongruentna" else (
+                config.color_words[1 - idx] if ttype == "niekongruentna" else config.neutral_stim
+            )
+            trials.append({"word": word, "color": color, "type": ttype, "key": key})
+    return trials
