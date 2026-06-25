@@ -1,0 +1,163 @@
+import csv
+import random
+import time
+from psychopy import visual, core
+from psychopy.hardware import keyboard
+import config
+from functions import (
+    get_subject_info,
+    create_results_dir,
+    show_text,
+    generate_experiment_pool,
+    generate_training_pool,
+)
+
+#zebranie danych i przygotowanie srodowiska
+info = get_subject_info()
+create_results_dir()
+
+win = visual.Window(size=[1024, 768], fullscr=False, units="pix", color="#D3D3D3", checkTiming=False)
+kb = keyboard.Keyboard()
+
+#instrukcja glowna i sesja treningowa
+show_text(win, "INSTRUKCJA TESTU STROOPA\n\nIgnoruj znaczenie slow. Podawaj wylacznie KOLOR CZCIONKI.\n\nKlawisze:\nZ - kolor ZIELONY\nC - kolor CZERWONY\n\nNacisnij spacje, aby zaczac trening.", kb)
+
+trening_ok = False
+podejscie = 1
+
+while podejscie <= 3 and not trening_ok:
+    show_text(win, f"Podejscie {podejscie}/3. Czesc 1: Rozpoznawanie kolorow (XXXX).\n\nNacisnij spacje.", kb)
+    t1 = generate_training_pool(part=1, n_trials=config.training_part1_trials)
+    
+    show_text(win, f"Podejscie {podejscie}/3. Czesc 2: Wlasciwy trening Stroopa.\n\nNacisnij spacje.", kb)
+    t2 = generate_training_pool(part=2, n_trials=config.training_part2_trials)
+    
+    caly_trening = t1 + t2
+    poprawne_t = 0
+    
+    #petla prob treningowych
+    for p in caly_trening:
+        visual.TextStim(win, text="+", color="black", height=40).draw()
+        win.flip()
+        core.wait(config.fixation_time)
+        
+        visual.TextStim(win, text=p["word"], color=p["color"], height=50, bold=True).draw()
+        win.callOnFlip(kb.clearEvents)
+        win.callOnFlip(kb.clock.reset)
+        win.flip()
+        
+        pk = None
+        while kb.clock.getTime() <= config.max_rt:
+            keys = kb.getKeys(keyList=config.valid_keys, waitRelease=False)
+            if keys:
+                pk = keys[0]
+                break
+                
+        resp = pk.name if pk else "timeout"
+        is_ok = (resp == p["key"])
+        if is_ok:
+            poprawne_t += 1
+            
+        fb = "Poprawnie!" if is_ok else ("Brak odpowiedzi!" if resp == "timeout" else "Blad!")
+        visual.TextStim(win, text=fb, color="green" if is_ok else "red", height=40).draw()
+        win.flip()
+        core.wait(0.5)
+        
+        win.flip()
+        core.wait(random.uniform(0.8, 1.2))
+        
+    skutecznosc = poprawne_t / len(caly_trening)
+    if skutecznosc >= config.pass_criterion:
+        trening_ok = True
+        show_text(win, f"Trening zaliczony! Wynik: {skutecznosc*100:.1f}%\n\nSpacja = start eksperymentu.", kb)
+    else:
+        podejscie += 1
+        if podejscie <= 3:
+            show_text(win, f"Nie osiagnieto 80% (Wynik: {skutecznosc*100:.1f}%).\n\nPowtorka treningu. Nacisnij spacje.", kb)
+        else:
+            show_text(win, "Trening niezaliczony 3 razy. Koniec.", kb)
+            win.close()
+            core.quit()
+
+#glowny eksperyment (Faza testowa)
+results = []
+nr_globalny = 1
+
+pula = generate_experiment_pool()
+bloki = [pula[i : i + 30] for i in range(0, 120, 30)]
+
+for idx_b, dane_bloku in enumerate(bloki):
+    b_poprawne = 0
+    b_rt_suma = 0
+    b_reakcje = 0
+    
+    for p in dane_bloku:
+        t_start = time.time()
+        
+        visual.TextStim(win, text="+", color="black", height=40).draw()
+        win.flip()
+        core.wait(config.fixation_time)
+        
+        visual.TextStim(win, text=p["word"], color=p["color"], height=50, bold=True).draw()
+        win.callOnFlip(kb.clearEvents)
+        win.callOnFlip(kb.clock.reset)
+        win.flip()
+        
+        pk = None
+        while kb.clock.getTime() <= config.max_rt:
+            keys = kb.getKeys(keyList=config.valid_keys, waitRelease=False)
+            if keys:
+                pk = keys[0]
+                break
+                
+        resp = pk.name if pk else "timeout"
+        rt = pk.rt if pk else None
+        is_ok = (resp == p["key"])
+        
+        if is_ok:
+            b_poprawne += 1
+        if rt:
+            b_rt_suma += rt
+            b_reakcje += 1
+            
+        results.append([nr_globalny, idx_b + 1, p["type"], p["word"], p["color"], p["key"], resp, rt if rt else "", int(is_ok), t_start])
+        nr_globalny += 1
+        
+        win.flip()
+        core.wait(random.uniform(0.8, 1.2))
+        
+    if idx_b < config.n_blocks - 1:
+        s_rt = (b_rt_suma / b_reakcje * 1000) if b_reakcje > 0 else 0
+        s_acc = (b_poprawne / config.n_trials) * 100
+        show_text(win, f"Koniec bloku {idx_b + 1} z 4.\n\nWyniki tego bloku:\n- Poprawnosc: {s_acc:.1f}%\n- Sredni RT: {s_rt:.0f} ms\n\nCzas na odpoczynek. Nacisnij spacje.", kb)
+
+#zapis wynikow do dedykowanego folderu /results
+filename = f"results/stroop_{info['ID']}_{int(time.time())}.csv"
+with open(filename, mode="w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["trial", "block", "trial_type", "word", "color", "correct_key", "response", "rt", "correct", "start_time"])
+    writer.writerows(results)
+
+#obliczanie statystyk koncowych i efektu Stroopa
+rt_c = [r[7] for r in results if r[2] == "kongruentna" and r[8] == 1 and r[7] != ""]
+rt_inc = [r[7] for r in results if r[2] == "niekongruentna" and r[8] == 1 and r[7] != ""]
+ogolna_acc = sum([r[8] for r in results])
+bledy = len(results) - ogolna_acc
+
+m_rt_c = (sum(rt_c) / len(rt_c) * 1000) if rt_c else 0
+m_rt_inc = (sum(rt_inc) / len(rt_inc) * 1000) if rt_inc else 0
+efekt = m_rt_inc - m_rt_c
+
+podsumowanie = (
+    "Eksperyment zakonczony!\n\n"
+    f"Poprawnosc globalna: {(ogolna_acc/120)*100:.1f}%\n"
+    f"Bledy / Timeouty: {bledy}\n"
+    f"RT Kongruentne: {m_rt_c:.0f} ms\n"
+    f"RT Niekongruentne: {m_rt_inc:.0f} ms\n\n"
+    f"EFEKT STROOPA: {efekt:.0f} ms\n\n"
+    "Dane zapisane. Nacisnij spacje, aby wyjsc."
+)
+
+show_text(win, podsumowanie, kb)
+win.close()
+core.quit()
