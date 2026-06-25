@@ -1,0 +1,22 @@
+#dane struktury badania
+n_trials = 30
+n_blocks = 4
+max_rt = 2.0
+fixation_time = 0.5
+
+#definicje bodzcow
+colors = ["red", "green"]
+color_words = ["CZERWONY", "ZIELONY"]
+neutral_stim = "XXXX"
+
+#mapowanie klawiszy
+key_mapping = {
+    "red": "c",
+    "green": "z",
+}
+valid_keys = ["z", "c"]
+
+#dane treningu
+training_part1_trials = 16
+training_part2_trials = 24
+pass_criterion = 0.80
